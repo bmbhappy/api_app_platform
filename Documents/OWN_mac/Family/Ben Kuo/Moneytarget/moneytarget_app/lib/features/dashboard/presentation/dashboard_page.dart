@@ -30,6 +30,7 @@ class _DashboardPageState extends State<DashboardPage> {
   DateTime? _rangeEnd;
   String? _customLabel;
   GoalBreakdownInterval _breakdownInterval = GoalBreakdownInterval.month;
+  final Set<String> _visibleTrendMetrics = {'收入', '存款', '支出'};
 
   @override
   void initState() {
@@ -159,6 +160,18 @@ class _DashboardPageState extends State<DashboardPage> {
             });
           },
           currencySettings: currencySettings,
+          visibleMetrics: _visibleTrendMetrics,
+          onToggleMetric: (metric) {
+            setState(() {
+              if (_visibleTrendMetrics.contains(metric)) {
+                if (_visibleTrendMetrics.length > 1) {
+                  _visibleTrendMetrics.remove(metric);
+                }
+              } else {
+                _visibleTrendMetrics.add(metric);
+              }
+            });
+          },
         ),
         const SizedBox(height: 16),
         SummaryCard(
@@ -911,6 +924,8 @@ class _GoalBreakdownSection extends StatelessWidget {
     required this.interval,
     required this.onIntervalChanged,
     required this.currencySettings,
+    required this.visibleMetrics,
+    required this.onToggleMetric,
   });
 
   final Goal goal;
@@ -918,6 +933,8 @@ class _GoalBreakdownSection extends StatelessWidget {
   final GoalBreakdownInterval interval;
   final ValueChanged<GoalBreakdownInterval> onIntervalChanged;
   final CurrencySettings currencySettings;
+  final Set<String> visibleMetrics;
+  final ValueChanged<String> onToggleMetric;
 
   @override
   Widget build(BuildContext context) {
@@ -966,21 +983,27 @@ class _GoalBreakdownSection extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                _LegendDot(
-                  color: Colors.blue,
+                _MetricToggleChip(
                   label: '收入',
+                  color: Colors.blue,
+                  selected: visibleMetrics.contains('收入'),
+                  onSelected: onToggleMetric,
                 ),
-                const SizedBox(width: 12),
-                _LegendDot(
-                  color: theme.colorScheme.primary,
+                _MetricToggleChip(
                   label: '存款',
+                  color: theme.colorScheme.primary,
+                  selected: visibleMetrics.contains('存款'),
+                  onSelected: onToggleMetric,
                 ),
-                const SizedBox(width: 12),
-                _LegendDot(
-                  color: theme.colorScheme.error,
+                _MetricToggleChip(
                   label: '支出',
+                  color: theme.colorScheme.error,
+                  selected: visibleMetrics.contains('支出'),
+                  onSelected: onToggleMetric,
                 ),
               ],
             ),
@@ -995,6 +1018,16 @@ class _GoalBreakdownSection extends StatelessWidget {
                   ),
                 ),
               )
+            else if (visibleMetrics.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: Text(
+                    '請至少保留一個趨勢指標顯示',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              )
             else
               SizedBox(
                 height: 260,
@@ -1004,6 +1037,7 @@ class _GoalBreakdownSection extends StatelessWidget {
                   currencySettings: currencySettings,
                   theme: theme,
                   requiredAmount: requiredAmount,
+                  visibleMetrics: visibleMetrics,
                 ),
               ),
           ],
@@ -1120,6 +1154,7 @@ class _GoalBreakdownTrendChart extends StatelessWidget {
     required this.currencySettings,
     required this.theme,
     required this.requiredAmount,
+    required this.visibleMetrics,
   });
 
   final List<_BreakdownGroup> data;
@@ -1127,6 +1162,7 @@ class _GoalBreakdownTrendChart extends StatelessWidget {
   final CurrencySettings currencySettings;
   final ThemeData theme;
   final double requiredAmount;
+  final Set<String> visibleMetrics;
 
   @override
   Widget build(BuildContext context) {
@@ -1152,6 +1188,14 @@ class _GoalBreakdownTrendChart extends StatelessWidget {
       ),
     ];
 
+    final activeMetrics = metrics
+        .where((metric) => visibleMetrics.contains(metric.label))
+        .toList(growable: false);
+
+    if (activeMetrics.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         const double horizontalPadding = 32;
@@ -1161,6 +1205,8 @@ class _GoalBreakdownTrendChart extends StatelessWidget {
         final double chartWidth = math.max(constraints.maxWidth, baseWidth);
         final savingColor =
             metrics.firstWhere((metric) => metric.label == '存款').color;
+        final showAverageLine =
+            activeMetrics.any((metric) => metric.label == '存款');
 
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -1170,7 +1216,7 @@ class _GoalBreakdownTrendChart extends StatelessWidget {
               size: Size(chartWidth, 220),
               painter: _TrendLinePainter(
                 data: data,
-                metrics: metrics,
+                metrics: activeMetrics,
                 numberFormat: numberFormat,
                 axisColor: theme.colorScheme.outlineVariant,
                 labelStyle:
@@ -1179,6 +1225,7 @@ class _GoalBreakdownTrendChart extends StatelessWidget {
                 requiredAmount: requiredAmount,
                 averageColor: savingColor,
                 currencySettings: currencySettings,
+                showAverageLine: showAverageLine,
               ),
             ),
           ),
@@ -1199,6 +1246,7 @@ class _TrendLinePainter extends CustomPainter {
     required this.requiredAmount,
     required this.averageColor,
     required this.currencySettings,
+    required this.showAverageLine,
   });
 
   final List<_BreakdownGroup> data;
@@ -1210,9 +1258,13 @@ class _TrendLinePainter extends CustomPainter {
   final double requiredAmount;
   final Color averageColor;
   final CurrencySettings currencySettings;
+  final bool showAverageLine;
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (metrics.isEmpty) {
+      return;
+    }
     final maxValue = _maxDataValue();
     final double top = 24;
     final double bottom = size.height - 48;
@@ -1237,7 +1289,7 @@ class _TrendLinePainter extends CustomPainter {
       textDirection: ui.TextDirection.ltr,
     );
 
-    if (requiredAmount > 0 && maxValue > 0) {
+    if (showAverageLine && requiredAmount > 0 && maxValue > 0) {
       final averageRatio = (requiredAmount / maxValue).clamp(0.0, 1.0);
       final averageY = bottom - usableHeight * averageRatio;
       final dashPaint = Paint()
@@ -1351,7 +1403,9 @@ class _TrendLinePainter extends CustomPainter {
         maxValue = math.max(maxValue, metric.extractor(group));
       }
     }
-    maxValue = math.max(maxValue, requiredAmount);
+    if (showAverageLine) {
+      maxValue = math.max(maxValue, requiredAmount);
+    }
     return maxValue <= 0 ? 1 : maxValue;
   }
 
@@ -1394,28 +1448,38 @@ class _TrendMetric {
   final double Function(_BreakdownGroup group) extractor;
 }
 
-class _LegendDot extends StatelessWidget {
-  const _LegendDot({required this.color, required this.label});
+class _MetricToggleChip extends StatelessWidget {
+  const _MetricToggleChip({
+    required this.label,
+    required this.color,
+    required this.selected,
+    required this.onSelected,
+  });
 
-  final Color color;
   final String label;
+  final Color color;
+  final bool selected;
+  final ValueChanged<String> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
+    final theme = Theme.of(context);
+    return FilterChip(
+      label: Text(
+        label,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: selected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
         ),
-        const SizedBox(width: 4),
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
-      ],
+      ),
+      avatar: CircleAvatar(
+        backgroundColor: color,
+        radius: 6,
+      ),
+      selected: selected,
+      selectedColor: color.withValues(alpha: (color.a * 0.85).clamp(0.0, 1.0)),
+      showCheckmark: false,
+      onSelected: (_) => onSelected(label),
     );
   }
 }
