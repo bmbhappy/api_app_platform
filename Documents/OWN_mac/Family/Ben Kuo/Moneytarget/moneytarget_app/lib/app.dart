@@ -200,8 +200,8 @@ class _MoneyTargetAppState extends State<MoneyTargetApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Money Target',
+                return MaterialApp(
+                  title: 'MoneyTarget',
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
@@ -296,7 +296,7 @@ class _MoneyTargetAppState extends State<MoneyTargetApp> {
       case 3:
         return '設定';
       default:
-        return 'Money Target';
+                    return 'MoneyTarget';
     }
   }
 }
