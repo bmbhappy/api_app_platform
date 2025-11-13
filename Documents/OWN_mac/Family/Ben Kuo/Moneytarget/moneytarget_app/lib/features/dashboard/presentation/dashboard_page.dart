@@ -1216,7 +1216,7 @@ class _TrendLinePainter extends CustomPainter {
 
       textPainter.text = TextSpan(
         text:
-            '平均存款 ${currencySettings.symbol}${numberFormat.format(currencySettings.toDisplay(averageSaving))}',
+            '平均存款需求 ${currencySettings.symbol}${numberFormat.format(currencySettings.toDisplay(averageSaving))}',
         style: labelStyle.copyWith(color: averageColor, fontWeight: FontWeight.w600),
       );
       textPainter.layout();
