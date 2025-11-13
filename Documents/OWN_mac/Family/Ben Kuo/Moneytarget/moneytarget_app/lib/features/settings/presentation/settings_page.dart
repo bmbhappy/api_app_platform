@@ -134,6 +134,9 @@ class SettingsPage extends StatelessWidget {
           onChanged: onUpdateCategories,
         ),
         const SizedBox(height: 24),
+        const _SectionTitle(title: '關於'),
+        const AboutCard(),
+        const SizedBox(height: 24),
         _SectionTitle(title: '資料管理'),
         Card(
           child: Column(
@@ -562,6 +565,28 @@ class _CategoryEditor extends StatelessWidget {
             child: const Text('新增'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class AboutCard extends StatelessWidget {
+  const AboutCard({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            _InfoRow(label: '版本號', value: '1.0.0'),
+            _InfoRow(label: '著作權所有', value: 'Fusion Next Inc.'),
+            _InfoRow(label: '聯絡我們', value: '+886-932-215629'),
+            _InfoRow(label: 'Email', value: 'contact@fusionnextinc.com'),
+          ],
+        ),
       ),
     );
   }
