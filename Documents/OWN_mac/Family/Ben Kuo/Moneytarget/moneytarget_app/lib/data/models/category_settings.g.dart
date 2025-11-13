@@ -1,0 +1,47 @@
+// GENERATED CODE - DO NOT MODIFY BY HAND
+
+part of 'category_settings.dart';
+
+// **************************************************************************
+// TypeAdapterGenerator
+// **************************************************************************
+
+class CategorySettingsAdapter extends TypeAdapter<CategorySettings> {
+  @override
+  final int typeId = 3;
+
+  @override
+  CategorySettings read(BinaryReader reader) {
+    final numOfFields = reader.readByte();
+    final fields = <int, dynamic>{
+      for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
+    };
+    return CategorySettings(
+      incomeSources: (fields[0] as List).cast<String>(),
+      savingSources: (fields[1] as List).cast<String>(),
+      expenseCategories: (fields[2] as List).cast<String>(),
+    );
+  }
+
+  @override
+  void write(BinaryWriter writer, CategorySettings obj) {
+    writer
+      ..writeByte(3)
+      ..writeByte(0)
+      ..write(obj.incomeSources)
+      ..writeByte(1)
+      ..write(obj.savingSources)
+      ..writeByte(2)
+      ..write(obj.expenseCategories);
+  }
+
+  @override
+  int get hashCode => typeId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CategorySettingsAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
+}
