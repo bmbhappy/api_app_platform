@@ -929,6 +929,8 @@ class _GoalBreakdownSection extends StatelessWidget {
       ..maximumFractionDigits =
           currencySettings.selectedCurrency == Currency.twd ? 0 : 2;
 
+    final requiredAmount = _requiredAmountForInterval();
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1001,6 +1003,7 @@ class _GoalBreakdownSection extends StatelessWidget {
                   numberFormat: numberFormat,
                   currencySettings: currencySettings,
                   theme: theme,
+                  requiredAmount: requiredAmount,
                 ),
               ),
           ],
@@ -1020,33 +1023,55 @@ class _GoalBreakdownSection extends StatelessWidget {
     final map = <String, _BreakdownGroup>{};
 
     for (final entry in entries) {
-      final normalizedDate = DateTime(entry.date.year, entry.date.month, entry.date.day);
+      final normalizedDate =
+          DateTime(entry.date.year, entry.date.month, entry.date.day);
       late String groupKey;
       late DateTime sortKey;
       late String label;
+      late DateTime periodStart;
+      late DateTime periodEnd;
 
       switch (interval) {
         case GoalBreakdownInterval.year:
           groupKey = '${normalizedDate.year}';
           sortKey = DateTime(normalizedDate.year);
           label = '${normalizedDate.year}年';
+          periodStart = DateTime(normalizedDate.year, 1, 1);
+          periodEnd = DateTime(normalizedDate.year, 12, 31);
           break;
         case GoalBreakdownInterval.month:
           groupKey = '${normalizedDate.year}-${normalizedDate.month}';
           sortKey = DateTime(normalizedDate.year, normalizedDate.month, 1);
           label = DateFormat('yyyy/MM').format(sortKey);
+          periodStart = DateTime(normalizedDate.year, normalizedDate.month, 1);
+          final nextMonth = normalizedDate.month == 12 ? 1 : normalizedDate.month + 1;
+          final nextYear = normalizedDate.month == 12
+              ? normalizedDate.year + 1
+              : normalizedDate.year;
+          periodEnd = DateTime(nextYear, nextMonth, 1)
+              .subtract(const Duration(days: 1));
           break;
         case GoalBreakdownInterval.week:
-          final weekStart = normalizedDate.subtract(Duration(days: normalizedDate.weekday - 1));
-          groupKey = '${weekStart.year}-${weekStart.month}-${weekStart.day}';
+          final weekStart = normalizedDate
+              .subtract(Duration(days: normalizedDate.weekday - 1));
+          final weekEnd = weekStart.add(const Duration(days: 6));
+          groupKey =
+              '${weekStart.year}-${weekStart.month}-${weekStart.day}';
           sortKey = weekStart;
           label = DateFormat('MM/dd').format(weekStart);
+          periodStart = weekStart;
+          periodEnd = weekEnd;
           break;
       }
 
       final group = map.putIfAbsent(
         groupKey,
-        () => _BreakdownGroup(label: label, sortKey: sortKey),
+        () => _BreakdownGroup(
+          label: label,
+          sortKey: sortKey,
+          periodStart: periodStart,
+          periodEnd: periodEnd,
+        ),
       );
 
       switch (entry.type) {
@@ -1071,6 +1096,21 @@ class _GoalBreakdownSection extends StatelessWidget {
 
     return groups;
   }
+
+  double _requiredAmountForInterval() {
+    switch (interval) {
+      case GoalBreakdownInterval.year:
+        final years = goal.endDate.year - goal.startDate.year + 1;
+        if (years <= 0) {
+          return goal.targetAmount;
+        }
+        return goal.targetAmount / years;
+      case GoalBreakdownInterval.month:
+        return goal.requiredMonthlyAmount;
+      case GoalBreakdownInterval.week:
+        return goal.requiredWeeklyAmount;
+    }
+  }
 }
 
 class _GoalBreakdownTrendChart extends StatelessWidget {
@@ -1079,12 +1119,14 @@ class _GoalBreakdownTrendChart extends StatelessWidget {
     required this.numberFormat,
     required this.currencySettings,
     required this.theme,
+    required this.requiredAmount,
   });
 
   final List<_BreakdownGroup> data;
   final NumberFormat numberFormat;
   final CurrencySettings currencySettings;
   final ThemeData theme;
+  final double requiredAmount;
 
   @override
   Widget build(BuildContext context) {
@@ -1117,11 +1159,8 @@ class _GoalBreakdownTrendChart extends StatelessWidget {
             ? horizontalPadding * 2
             : horizontalPadding * 2 + 64 * (data.length - 1);
         final double chartWidth = math.max(constraints.maxWidth, baseWidth);
-        final double averageSaving = data.isEmpty
-            ? 0
-            : data.map((group) => group.saving).reduce((a, b) => a + b) / data.length;
-
-        final savingColor = metrics.firstWhere((metric) => metric.label == '存款').color;
+        final savingColor =
+            metrics.firstWhere((metric) => metric.label == '存款').color;
 
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -1137,7 +1176,7 @@ class _GoalBreakdownTrendChart extends StatelessWidget {
                 labelStyle:
                     theme.textTheme.labelSmall ?? const TextStyle(fontSize: 11),
                 horizontalPadding: horizontalPadding,
-                averageSaving: averageSaving,
+                requiredAmount: requiredAmount,
                 averageColor: savingColor,
                 currencySettings: currencySettings,
               ),
@@ -1157,7 +1196,7 @@ class _TrendLinePainter extends CustomPainter {
     required this.axisColor,
     required this.labelStyle,
     required this.horizontalPadding,
-    required this.averageSaving,
+    required this.requiredAmount,
     required this.averageColor,
     required this.currencySettings,
   });
@@ -1168,7 +1207,7 @@ class _TrendLinePainter extends CustomPainter {
   final Color axisColor;
   final TextStyle labelStyle;
   final double horizontalPadding;
-  final double averageSaving;
+  final double requiredAmount;
   final Color averageColor;
   final CurrencySettings currencySettings;
 
@@ -1198,8 +1237,8 @@ class _TrendLinePainter extends CustomPainter {
       textDirection: ui.TextDirection.ltr,
     );
 
-    if (averageSaving > 0 && maxValue > 0) {
-      final averageRatio = (averageSaving / maxValue).clamp(0.0, 1.0);
+    if (requiredAmount > 0 && maxValue > 0) {
+      final averageRatio = (requiredAmount / maxValue).clamp(0.0, 1.0);
       final averageY = bottom - usableHeight * averageRatio;
       final dashPaint = Paint()
         ..color = averageColor
@@ -1216,7 +1255,7 @@ class _TrendLinePainter extends CustomPainter {
 
       textPainter.text = TextSpan(
         text:
-            '平均存款需求 ${currencySettings.symbol}${numberFormat.format(currencySettings.toDisplay(averageSaving))}',
+            '平均存款需求 ${currencySettings.symbol}${numberFormat.format(currencySettings.toDisplay(requiredAmount))}',
         style: labelStyle.copyWith(color: averageColor, fontWeight: FontWeight.w600),
       );
       textPainter.layout();
@@ -1312,6 +1351,7 @@ class _TrendLinePainter extends CustomPainter {
         maxValue = math.max(maxValue, metric.extractor(group));
       }
     }
+    maxValue = math.max(maxValue, requiredAmount);
     return maxValue <= 0 ? 1 : maxValue;
   }
 
@@ -1324,10 +1364,17 @@ class _TrendLinePainter extends CustomPainter {
 }
 
 class _BreakdownGroup {
-  _BreakdownGroup({required this.label, required this.sortKey});
+  _BreakdownGroup({
+    required this.label,
+    required this.sortKey,
+    required this.periodStart,
+    required this.periodEnd,
+  });
 
   final String label;
   final DateTime sortKey;
+  final DateTime periodStart;
+  final DateTime periodEnd;
   double income = 0;
   double saving = 0;
   double expense = 0;
