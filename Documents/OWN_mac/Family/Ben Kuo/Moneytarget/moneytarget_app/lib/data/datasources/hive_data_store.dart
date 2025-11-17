@@ -44,7 +44,9 @@ class HiveDataStore implements MoneyDataStore {
     final categoryBox = await Hive.openBox<CategorySettings>('category_settings');
     final currencyBox = await Hive.openBox<CurrencySettings>('currency_settings');
 
-    if (!goalBox.containsKey(_goalKey) || entryBox.isEmpty) {
+    // 只在第一次安裝時初始化 mock 數據
+    // 如果已經有目標數據（goal），說明已經初始化過了，就不應該再重新生成
+    if (!goalBox.containsKey(_goalKey)) {
       final mock = MockMoneyRepository.generate();
       await goalBox.put(_goalKey, mock.goal);
       await entryBox.clear();
@@ -54,6 +56,7 @@ class HiveDataStore implements MoneyDataStore {
       await categoryBox.put(_categoryKey, mock.categorySettings);
       await currencyBox.put(_currencyKey, CurrencySettings.defaults());
     } else {
+      // 已經初始化過，只檢查並補齊可能缺失的類別和貨幣設置
       if (!categoryBox.containsKey(_categoryKey)) {
         await categoryBox.put(_categoryKey, CategorySettings.defaults());
       }

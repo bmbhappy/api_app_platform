@@ -31,8 +31,6 @@ class _MoneyTargetAppState extends State<MoneyTargetApp> {
   late MockMoneyRepository _repository;
   late CurrencySettings _currencySettings;
   int _selectedIndex = 0;
-  final GlobalKey<TransactionsPageState> _transactionsPageKey =
-      GlobalKey<TransactionsPageState>();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   TransactionType _currentTransactionType = TransactionType.income;
 
@@ -108,10 +106,6 @@ class _MoneyTargetAppState extends State<MoneyTargetApp> {
       _repository = _repository.copyWith(entries: updatedEntries);
     });
     await widget.dataStore.upsertEntry(entry);
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _transactionsPageKey.currentState?.handleEntryAdded(entry);
-    });
   }
 
   Future<void> _updateEntry(MoneyEntry entry) async {
@@ -125,10 +119,6 @@ class _MoneyTargetAppState extends State<MoneyTargetApp> {
       _repository = _repository.copyWith(entries: updatedEntries);
     });
     await widget.dataStore.upsertEntry(entry);
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _transactionsPageKey.currentState?.handleEntryAdded(entry);
-    });
   }
 
   Future<void> _deleteEntry(MoneyEntry entry) async {
@@ -138,10 +128,6 @@ class _MoneyTargetAppState extends State<MoneyTargetApp> {
       _repository = _repository.copyWith(entries: updatedEntries);
     });
     await widget.dataStore.deleteEntry(entry.id);
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _transactionsPageKey.currentState?.handleEntryRemoved(entry);
-    });
   }
 
   Future<void> _showAddEntrySheet([MoneyEntry? entry]) async {
@@ -223,7 +209,6 @@ class _MoneyTargetAppState extends State<MoneyTargetApp> {
               currencySettings: _currencySettings,
             ),
             TransactionsPage(
-              key: _transactionsPageKey,
               repository: _repository,
               currencySettings: _currencySettings,
               onTabChanged: (type) {
