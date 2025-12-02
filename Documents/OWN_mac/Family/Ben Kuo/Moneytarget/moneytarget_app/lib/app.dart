@@ -39,19 +39,6 @@ class _MoneyTargetAppState extends State<MoneyTargetApp> {
     super.initState();
     _repository = widget.initialRepository;
     _currencySettings = widget.dataStore.currencySettings;
-    _pruneFutureEntries();
-  }
-
-  Future<void> _pruneFutureEntries() async {
-    final cutoff = DateTime(2025, 11, 30, 23, 59, 59);
-    final filtered =
-        _repository.entries.where((e) => !e.date.isAfter(cutoff)).toList();
-    if (filtered.length == _repository.entries.length) return;
-
-    setState(() {
-      _repository = _repository.copyWith(entries: filtered);
-    });
-    await widget.dataStore.saveEntries(filtered);
   }
 
   Future<void> _updateGoal(Goal goal) async {

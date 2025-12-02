@@ -213,8 +213,8 @@ class _DashboardPageState extends State<DashboardPage> {
               value: currencySettings.format(totalExpense),
             ),
             SummaryMetric(
-              label: '存款 - 支出',
-              value: currencySettings.format(savingsNet),
+              label: '剩餘',
+              value: currencySettings.format(totalIncome - totalExpense - totalSavingFiltered),
             ),
           ],
           layout: SummaryCardLayout.grid,
@@ -256,7 +256,7 @@ class _DashboardPageState extends State<DashboardPage> {
         SummaryCard(
           title: '支出分析',
           collapsible: true,
-          subtitle: '依類別彙整',
+          subtitle: '依類別彙整 (總額: ${currencySettings.format(totalExpense)})',
           child: Column(
             children: expenseByCategory.entries.map((entry) {
               final total = entry.value;

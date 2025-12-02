@@ -42,7 +42,7 @@ class TransactionsPageState extends State<TransactionsPage>
   RangeFilterType _filterType = RangeFilterType.untilNow;
   DateTimeRange? _selectedRange;
   String? _customLabel;
-  bool _calendarMode = false;
+  bool _calendarMode = true;
   DateTime _selectedDate = DateTime.now();
   PageController? _calendarController;
   List<DateTime> _calendarMonths = [];
