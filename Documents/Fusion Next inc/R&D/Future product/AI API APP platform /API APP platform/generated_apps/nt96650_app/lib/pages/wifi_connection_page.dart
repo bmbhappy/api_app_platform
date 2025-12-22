@@ -35,9 +35,14 @@ class _WifiConnectionPageState extends State<WifiConnectionPage> {
     if (state.deviceIp != null) {
       _ipController.text = state.deviceIp!;
     }
-    _loadConnectionStatus();
-    _loadSavedWiFiCredentials();
-    _loadSavedWiFiList();
+    // 延遲初始化，避免在 IndexedStack 中立即執行
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadConnectionStatus();
+        _loadSavedWiFiCredentials();
+        _loadSavedWiFiList();
+      }
+    });
   }
   
   @override

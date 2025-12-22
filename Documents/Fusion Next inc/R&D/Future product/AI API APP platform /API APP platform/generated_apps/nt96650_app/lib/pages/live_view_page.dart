@@ -25,16 +25,16 @@ class _LiveViewPageState extends State<LiveViewPage> {
   bool _useFallbackViewer = false; // 是否使用備用查看器
   bool _mediaKitInitialized = false; // media_kit 播放器是否已初始化
   Timer? _keepAliveTimer; // Keep-alive 定時器，防止30秒後停止
-  bool _isReconnecting = false; // 是否正在重新連接，防止重複重連
-  bool _isRefreshing = false; // 是否正在刷新連接，防止重複刷新
-  DateTime? _lastRefreshTime; // 上次刷新時間，用於防抖
-  Player? _backupPlayer; // 備用播放器，用於無縫切換
-  VideoController? _backupVideoController; // 備用視頻控制器
   
   @override
   void initState() {
     super.initState();
-    _initializeDevice();
+    // 延遲初始化，避免在 IndexedStack 中立即執行
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _initializeDevice();
+      }
+    });
   }
   
   @override
@@ -43,14 +43,13 @@ class _LiveViewPageState extends State<LiveViewPage> {
     _keepAliveTimer = null;
     _videoController?.dispose();
     _mediaKitPlayer?.dispose();
-    _backupPlayer?.dispose(); // 釋放備用播放器
     // VideoController 不需要手動 dispose，它會隨 Player 一起釋放
     _videoControllerKit = null;
-    _backupVideoController = null;
     super.dispose();
   }
   
   Future<void> _initializeDevice() async {
+    if (!mounted) return;
     final state = Provider.of<AppState>(context, listen: false);
     if (state.deviceIp != null) {
       _deviceService.setDeviceIp(state.deviceIp!);
@@ -443,31 +442,6 @@ class _LiveViewPageState extends State<LiveViewPage> {
                 setState(() {
                   _mediaKitInitialized = playing;
                 });
-                
-                // 如果播放器停止且是在即時預覽狀態，立即嘗試恢復
-                // 使用無黑屏方式，避免完全重新連接
-                if (!playing) {
-                  final state = Provider.of<AppState>(context, listen: false);
-                  if (state.movieModeState == MovieModeState.liveView && 
-                      state.isStreaming &&
-                      !_isReconnecting &&
-                      !_isRefreshing) {
-                    // 防抖：如果距離上次刷新不到2秒，則跳過
-                    final now = DateTime.now();
-                    if (_lastRefreshTime == null || 
-                        now.difference(_lastRefreshTime!).inSeconds >= 2) {
-                      print('播放器狀態變為停止，立即嘗試無黑屏恢復');
-                      // 立即嘗試無黑屏刷新，不延遲
-                      _refreshRTSPStreamWithoutBlackScreen().catchError((e) {
-                        print('無黑屏刷新失敗：$e，嘗試完全重新連接');
-                        // 只有在無黑屏刷新失敗時才完全重新連接
-                        _reconnectStream();
-                      });
-                    } else {
-                      print('播放器停止，但距離上次刷新太近，跳過（防抖）');
-                    }
-                  }
-                }
               }
             });
             
@@ -477,28 +451,29 @@ class _LiveViewPageState extends State<LiveViewPage> {
                 setState(() {
                   _useFallbackViewer = true;
                 });
-                // 對於 RTSP 實時串流，錯誤可能是暫時的
-                // 嘗試使用無黑屏方式刷新連接，而不是完全重新連接
+              }
+            });
+            
+            // 監聽播放器完成事件（用於檢測連接中斷）
+            // 注意：對於RTSP實時串流，completed事件可能表示連接中斷
+            _mediaKitPlayer!.stream.completed.listen((completed) {
+              if (completed) {
+                print('media_kit 播放完成，可能連接中斷');
+                // 如果是在即時預覽狀態，立即嘗試重新連接
                 final state = Provider.of<AppState>(context, listen: false);
-                if (state.movieModeState == MovieModeState.liveView && !_isRefreshing) {
-                  // 延遲後嘗試無黑屏刷新
-                  Future.delayed(Duration(seconds: 1), () {
-                    if (mounted && 
-                        state.movieModeState == MovieModeState.liveView &&
-                        !_isRefreshing) {
-                      _refreshRTSPStreamWithoutBlackScreen().catchError((e) {
-                        print('無黑屏刷新失敗：$e，嘗試完全重新連接');
-                        _reconnectStream();
-                      });
+                if (state.movieModeState == MovieModeState.liveView && 
+                    mounted && 
+                    state.streamUrl != null &&
+                    state.streamUrl!.startsWith('rtsp://')) {
+                  // 延遲一小段時間後重新連接，避免立即重連導致問題
+                  Future.delayed(Duration(milliseconds: 500), () {
+                    if (mounted) {
+                      _reconnectStream();
                     }
                   });
                 }
               }
             });
-            
-            // 注意：對於 RTSP 實時串流，不應該監聽 completed 事件
-            // 因為實時串流理論上永遠不會"完成"，completed 事件可能是誤觸發
-            // 改為通過 playing 狀態和錯誤事件來檢測連接問題
             
             // 打開媒體並開始播放
             await _mediaKitPlayer!.open(Media(streamUrl));
@@ -623,51 +598,48 @@ class _LiveViewPageState extends State<LiveViewPage> {
   }
   
   /// 啟動 keep-alive 機制，防止30秒後停止
-  /// 每15秒發送一次心跳並重新打開連接，在30秒超時前刷新（更激進的策略）
+  /// 每20秒主動重新打開RTSP連接，在30秒超時前刷新連接
   void _startKeepAlive() {
     _keepAliveTimer?.cancel();
     
-    _keepAliveTimer = Timer.periodic(Duration(seconds: 15), (timer) async {
+    _keepAliveTimer = Timer.periodic(Duration(seconds: 20), (timer) async {
       final state = Provider.of<AppState>(context, listen: false);
       
-      // 只有在即時預覽狀態時才發送 keep-alive
+      // 只有在即時預覽狀態時才執行 keep-alive
       if (state.movieModeState == MovieModeState.liveView && 
           state.isStreaming && 
-          _mediaKitPlayer != null) {
+          _mediaKitPlayer != null &&
+          state.streamUrl != null &&
+          state.streamUrl!.startsWith('rtsp://')) {
         try {
-          // 方法1: 發送設備心跳命令，保持連接活躍
+          // 方法1: 發送設備心跳命令
           await _deviceService.heartbeat();
           print('Keep-alive: 發送心跳成功');
           
-          // 方法2: 在30秒超時前主動重新打開連接（每20秒執行一次）
-          // 這樣可以在服務器超時前刷新連接，避免播放器停止
+          // 方法2: 在30秒超時前（20秒時）主動重新打開RTSP連接
+          // 這是最關鍵的：必須真正重新建立RTSP連接，而不是只發送play命令
+          print('Keep-alive: 在30秒超時前主動重新打開RTSP連接（20秒間隔）');
+          
+          // 不停止播放器，直接重新打開連接，減少黑屏時間
           try {
-            if (!_mediaKitInitialized || _isRefreshing) {
-              print('Keep-alive: 播放器未初始化或正在刷新，跳過');
-              return;
-            }
+            // 先暫停（非常短暫，用戶不會察覺）
+            await _mediaKitPlayer!.pause();
+            await Future.delayed(Duration(milliseconds: 50));
             
-            // 檢查距離上次刷新的時間（縮短防抖時間，更頻繁刷新）
-            final now = DateTime.now();
-            if (_lastRefreshTime != null && 
-                now.difference(_lastRefreshTime!).inSeconds < 10) {
-              print('Keep-alive: 距離上次刷新太近，跳過（10秒防抖）');
-              return;
-            }
+            // 重新打開RTSP連接（這會重新建立整個RTSP會話）
+            await _mediaKitPlayer!.open(Media(state.streamUrl!));
+            await _mediaKitPlayer!.play();
             
-            // 在30秒超時前（15秒時）主動刷新連接
-            // 使用無黑屏的刷新方式
-            print('Keep-alive: 在30秒超時前主動刷新連接（15秒間隔，10秒防抖）');
-            await _refreshRTSPStreamWithoutBlackScreen();
+            print('Keep-alive: RTSP連接已刷新，避免30秒超時');
           } catch (e) {
-            print('Keep-alive: 刷新連接時發生錯誤：$e');
+            print('Keep-alive: 重新打開連接失敗：$e，嘗試完全重新連接');
+            // 如果重新打開失敗，嘗試完全重新連接
+            await _reconnectStream();
           }
         } catch (e) {
           print('Keep-alive: 發送心跳失敗：$e');
           // 如果心跳失敗，嘗試重新連接串流
-          if (state.streamUrl != null && state.streamUrl!.startsWith('rtsp://')) {
-            await _reconnectStream();
-          }
+          await _reconnectStream();
         }
       } else {
         // 如果不在即時預覽狀態，停止 keep-alive
@@ -677,164 +649,7 @@ class _LiveViewPageState extends State<LiveViewPage> {
     });
   }
   
-  /// 刷新 RTSP 串流（無黑屏方式：通過 seek 到當前位置來刷新連接）
-  /// 這會在30秒超時前刷新連接，避免播放器停止
-  /// 使用 seek 而不是重新打開連接，可以避免黑屏
-  Future<void> _refreshRTSPStreamWithoutBlackScreen() async {
-    final state = Provider.of<AppState>(context, listen: false);
-    
-    if (state.movieModeState != MovieModeState.liveView || 
-        state.streamUrl == null || 
-        !state.streamUrl!.startsWith('rtsp://') ||
-        _mediaKitPlayer == null) {
-      return;
-    }
-    
-    // 防止重複刷新
-    if (_isRefreshing) {
-      print('正在刷新中，跳過重複請求');
-      return;
-    }
-    
-    _isRefreshing = true;
-    _lastRefreshTime = DateTime.now();
-    
-    try {
-      print('刷新 RTSP 串流（無黑屏模式）：通過 seek 刷新連接');
-      
-      // 方法1: 嘗試使用 seek 來刷新連接（對於實時串流可能無效，但可以嘗試）
-      try {
-        // 獲取當前播放位置
-        final position = _mediaKitPlayer!.position;
-        if (position != null) {
-          // seek 到當前位置，這會觸發 RTSP 重新協商
-          await _mediaKitPlayer!.seek(position);
-          print('刷新 RTSP 串流成功（通過 seek，無黑屏）');
-        } else {
-          throw Exception('無法獲取播放位置');
-        }
-      } catch (e) {
-        print('Seek 刷新失敗：$e，嘗試重新打開連接');
-        
-        // 方法2: 如果 seek 失敗，嘗試重新打開連接（不停止播放器）
-        try {
-          // 直接打開新連接，不調用 stop()
-          // 這會建立新的 RTSP 會話，但保持播放器運行
-          await _mediaKitPlayer!.open(Media(state.streamUrl!));
-          
-          // 等待連接建立（較短時間）
-          await Future.delayed(Duration(milliseconds: 150));
-          
-          // 確保播放器正在播放
-          try {
-            await _mediaKitPlayer!.play();
-          } catch (e2) {
-            // 如果已經在播放，可能會拋出錯誤，這是正常的
-            print('播放器可能已經在播放（可忽略）：$e2');
-          }
-          
-          // 等待播放器真正開始播放
-          await Future.delayed(Duration(milliseconds: 200));
-          
-          print('刷新 RTSP 串流成功（重新打開連接，無黑屏）');
-        } catch (e2) {
-          print('重新打開連接失敗：$e2');
-          throw e2;
-        }
-      }
-      
-      // 更新狀態
-      if (mounted) {
-        setState(() {
-          _mediaKitInitialized = true;
-        });
-      }
-    } catch (e) {
-      print('刷新 RTSP 串流失敗：$e');
-      // 如果刷新失敗，不立即重新連接，等待下次 keep-alive
-      // 或者讓播放器狀態監聽器處理
-    } finally {
-      _isRefreshing = false;
-    }
-  }
-  
-  /// 刷新 RTSP 串流（使用備用播放器實現無縫切換，避免黑屏）
-  /// 在後台準備新連接，然後快速切換，確保畫面不中斷
-  Future<void> _refreshRTSPStream() async {
-    final state = Provider.of<AppState>(context, listen: false);
-    
-    if (state.movieModeState != MovieModeState.liveView || 
-        state.streamUrl == null || 
-        !state.streamUrl!.startsWith('rtsp://') ||
-        _mediaKitPlayer == null) {
-      return;
-    }
-    
-    // 防止重複刷新
-    if (_isRefreshing) {
-      print('正在刷新中，跳過重複請求');
-      return;
-    }
-    
-    _isRefreshing = true;
-    _lastRefreshTime = DateTime.now();
-    
-    try {
-      print('刷新 RTSP 串流：使用備用播放器實現無縫切換');
-      
-      // 方法：不刷新當前播放器，而是通過發送 RTSP OPTIONS 請求來保持連接活躍
-      // 或者簡單地調用 play() 來發送 RTSP PLAY 請求，這不會中斷當前播放
-      // 這比重新打開連接更安全，不會導致黑屏
-      
-      // 嘗試通過發送播放命令來刷新連接（這會發送 RTSP PLAY 請求）
-      // 如果連接已經斷開，這會觸發重新連接，但不會導致黑屏
-      try {
-        // 先暫停一小段時間（非常短，用戶不會察覺）
-        // 然後立即恢復播放，這會觸發 RTSP 重新協商
-        await _mediaKitPlayer!.pause();
-        await Future.delayed(Duration(milliseconds: 50)); // 非常短的暫停
-        await _mediaKitPlayer!.play();
-        
-        print('刷新 RTSP 串流成功：通過暫停/播放刷新連接（無黑屏）');
-      } catch (e) {
-        print('暫停/播放刷新失敗：$e，嘗試重新打開連接');
-        
-        // 如果暫停/播放失敗，則需要重新打開連接
-        // 但這次我們不停止播放器，直接打開新連接
-        try {
-          // 直接打開新連接，不停止當前播放
-          // media_kit 應該能夠處理這種情況
-          await _mediaKitPlayer!.open(Media(state.streamUrl!));
-          await Future.delayed(Duration(milliseconds: 200));
-          await _mediaKitPlayer!.play();
-          
-          print('刷新 RTSP 串流成功：重新打開連接');
-        } catch (e2) {
-          print('重新打開連接失敗：$e2');
-          throw e2;
-        }
-      }
-      
-      // 更新狀態
-      if (mounted) {
-        setState(() {
-          _mediaKitInitialized = true;
-        });
-      }
-      
-    } catch (e) {
-      print('刷新 RTSP 串流失敗：$e');
-      // 如果刷新失敗，嘗試完全重新連接
-      if (mounted && state.movieModeState == MovieModeState.liveView) {
-        await _reconnectStream();
-      }
-    } finally {
-      _isRefreshing = false;
-    }
-  }
-  
-  /// 重新連接串流（使用無黑屏方式，不重新創建播放器）
-  /// 改進：不停止播放器，直接重新打開連接，避免黑屏
+  /// 重新連接串流
   Future<void> _reconnectStream() async {
     final state = Provider.of<AppState>(context, listen: false);
     
@@ -842,63 +657,27 @@ class _LiveViewPageState extends State<LiveViewPage> {
       return;
     }
     
-    // 防止重複重連
-    if (_isReconnecting) {
-      print('正在重新連接中，跳過重複請求');
-      return;
-    }
-    
-    _isReconnecting = true;
-    print('重新連接 RTSP 串流（無黑屏模式）...');
+    print('重新連接 RTSP 串流...');
     
     try {
-      // 不停止播放器，直接使用無黑屏刷新方式
-      if (_mediaKitPlayer != null && state.streamUrl != null) {
+      // 先停止當前播放器
+      if (_mediaKitPlayer != null) {
         try {
-          // 使用無黑屏刷新方式，不重新創建播放器
-          await _refreshRTSPStreamWithoutBlackScreen();
-          print('重新連接 RTSP 串流成功（使用無黑屏方式）');
+          await _mediaKitPlayer!.stop();
         } catch (e) {
-          print('無黑屏刷新失敗：$e，嘗試完全重新連接');
-          // 只有在無黑屏刷新失敗時才完全重新連接
-          // 先停止當前播放器
-          try {
-            await _mediaKitPlayer!.stop();
-          } catch (e2) {
-            print('停止播放器時出錯（可忽略）：$e2');
-          }
-          
-          // 等待一小段時間
-          await Future.delayed(Duration(milliseconds: 300));
-          
-          // 重新啟動串流
-          await _startStream();
-          
-          // 等待播放器初始化
-          await Future.delayed(Duration(milliseconds: 500));
-          
-          // 刷新 UI
-          if (mounted) {
-            setState(() {
-              _mediaKitInitialized = true;
-            });
-          }
-          
-          print('重新連接 RTSP 串流成功（完全重新連接）');
+          print('停止播放器時出錯（可忽略）：$e');
         }
-      } else {
-        // 如果播放器不存在，重新啟動串流
-        await _startStream();
       }
+      
+      // 等待一小段時間
+      await Future.delayed(Duration(milliseconds: 500));
+      
+      // 重新啟動串流
+      await _startStream();
+      
+      print('重新連接 RTSP 串流成功');
     } catch (e) {
       print('重新連接 RTSP 串流失敗：$e');
-      if (mounted) {
-        setState(() {
-          _useFallbackViewer = true;
-        });
-      }
-    } finally {
-      _isReconnecting = false;
     }
   }
   
