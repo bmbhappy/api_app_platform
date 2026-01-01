@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
 
@@ -553,15 +554,41 @@ class DeviceService {
       final uri = Uri.parse(url).replace(queryParameters: queryParams);
       print('獲取縮圖: $uri');
       
-      final response = await http.get(uri).timeout(
+      final request = http.Request('GET', uri);
+      final streamedResponse = await http.Client().send(request).timeout(
         Duration(seconds: 10),
         onTimeout: () => throw TimeoutException('請求超時'),
       );
       
-      if (response.statusCode == 200) {
-        // 驗證響應內容是否真的是圖片
-        final contentType = response.headers['content-type'] ?? '';
-        final bodyBytes = response.bodyBytes;
+      if (streamedResponse.statusCode == 200) {
+        // 先檢查 Content-Length，如果太大（超過 1MB），可能不是縮圖，拒絕載入
+        // 正常的縮圖應該在幾十到幾百 KB 之間，1MB 已經是很寬鬆的限制
+        final contentLengthHeader = streamedResponse.headers['content-length'];
+        if (contentLengthHeader != null) {
+          final contentLength = int.tryParse(contentLengthHeader);
+          if (contentLength != null && contentLength > 1 * 1024 * 1024) {
+            // 超過 1MB，可能不是縮圖
+            print('縮圖響應過大（${(contentLength / (1024 * 1024)).toStringAsFixed(2)} MB），拒絕載入');
+            return {'status': 'error', 'message': '響應過大，可能不是有效的縮圖（${(contentLength / (1024 * 1024)).toStringAsFixed(2)} MB）'};
+          }
+        }
+        
+        // 使用流式處理來限制響應大小（最多 1MB）
+        final maxSize = 1 * 1024 * 1024; // 1MB
+        final bytes = <int>[];
+        int totalBytes = 0;
+        
+        await for (final chunk in streamedResponse.stream) {
+          totalBytes += chunk.length;
+          if (totalBytes > maxSize) {
+            print('縮圖響應超過最大限制（${(totalBytes / (1024 * 1024)).toStringAsFixed(2)} MB），停止載入');
+            return {'status': 'error', 'message': '響應過大，超過 1MB 限制'};
+          }
+          bytes.addAll(chunk);
+        }
+        
+        final bodyBytes = Uint8List.fromList(bytes);
+        final contentType = streamedResponse.headers['content-type'] ?? '';
         
         // 檢查響應大小，如果太小可能不是有效的圖片
         if (bodyBytes.isEmpty) {
@@ -594,7 +621,7 @@ class DeviceService {
           'contentType': contentType.isNotEmpty ? contentType : 'image/jpeg',
         };
       } else {
-        return {'status': 'error', 'message': 'HTTP ${response.statusCode}'};
+        return {'status': 'error', 'message': 'HTTP ${streamedResponse.statusCode}'};
       }
     } catch (e) {
       print('獲取縮圖錯誤: $e');
@@ -637,20 +664,108 @@ class DeviceService {
       final uri = Uri.parse(url).replace(queryParameters: queryParams);
       print('獲取屏幕縮圖: $uri');
       
-      final response = await http.get(uri).timeout(
+      final request = http.Request('GET', uri);
+      final streamedResponse = await http.Client().send(request).timeout(
         Duration(seconds: 10),
         onTimeout: () => throw TimeoutException('請求超時'),
       );
       
-      if (response.statusCode == 200) {
+      if (streamedResponse.statusCode == 200) {
+        // 先檢查 Content-Length，如果太大（超過 1MB），可能不是縮圖，拒絕載入
+        // 正常的縮圖應該在幾十到幾百 KB 之間，1MB 已經是很寬鬆的限制
+        final contentLengthHeader = streamedResponse.headers['content-length'];
+        if (contentLengthHeader != null) {
+          final contentLength = int.tryParse(contentLengthHeader);
+          if (contentLength != null && contentLength > 1 * 1024 * 1024) {
+            // 超過 1MB，可能不是縮圖（可能是整個視頻文件）
+            print('屏幕縮圖響應過大（${(contentLength / (1024 * 1024)).toStringAsFixed(2)} MB），拒絕載入（可能是整個視頻文件）');
+            return {'status': 'error', 'message': '響應過大，可能不是有效的縮圖（${(contentLength / (1024 * 1024)).toStringAsFixed(2)} MB）。設備可能不支持此影片的縮圖生成。'};
+          }
+        }
+        
+        // 使用流式處理來限制響應大小（最多 1MB）
+        final maxSize = 1 * 1024 * 1024; // 1MB
+        final bytes = <int>[];
+        int totalBytes = 0;
+        
+        await for (final chunk in streamedResponse.stream) {
+          totalBytes += chunk.length;
+          if (totalBytes > maxSize) {
+            print('屏幕縮圖響應超過最大限制（${(totalBytes / (1024 * 1024)).toStringAsFixed(2)} MB），停止載入');
+            return {'status': 'error', 'message': '響應過大，超過 1MB 限制（可能是整個視頻文件）'};
+          }
+          bytes.addAll(chunk);
+        }
+        
+        final bodyBytes = Uint8List.fromList(bytes);
+        final contentType = streamedResponse.headers['content-type'] ?? '';
+        
+        // 診斷：記錄響應信息（僅針對 getscreennail）
+        print('屏幕縮圖響應信息：');
+        print('  - Content-Type: $contentType');
+        print('  - Content-Length: ${bodyBytes.length} 字節');
+        if (bodyBytes.isNotEmpty) {
+          final headerBytes = bodyBytes.sublist(0, bodyBytes.length > 16 ? 16 : bodyBytes.length);
+          print('  - 前 16 個字節（十六進制）: ${headerBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
+          // 如果是文本響應（XML/HTML），嘗試顯示前 500 個字符
+          if (bodyBytes.length < 500 || contentType.contains('xml') || contentType.contains('text') || contentType.contains('html')) {
+            try {
+              final text = String.fromCharCodes(bodyBytes.length > 500 ? bodyBytes.sublist(0, 500) : bodyBytes);
+              print('  - 響應內容（文本）: ${text.substring(0, text.length > 200 ? 200 : text.length)}');
+            } catch (e) {
+              // 不是文本，忽略
+            }
+          }
+        }
+        
+        // 檢查響應大小，如果太小可能不是有效的圖片
+        if (bodyBytes.isEmpty) {
+          return {'status': 'error', 'message': '響應為空'};
+        }
+        
+        // 檢查是否是圖片格式（通過檢查文件頭）
+        bool isImage = false;
+        if (bodyBytes.length >= 2) {
+          // JPEG: FF D8
+          // PNG: 89 50
+          // GIF: 47 49
+          final header = bodyBytes.sublist(0, 2);
+          if ((header[0] == 0xFF && header[1] == 0xD8) || // JPEG
+              (header[0] == 0x89 && header[1] == 0x50) || // PNG
+              (header[0] == 0x47 && header[1] == 0x49)) { // GIF
+            isImage = true;
+            print('  - 檢測到圖片格式：${header[0].toRadixString(16)} ${header[1].toRadixString(16)}');
+          } else {
+            print('  - 不是標準圖片格式，文件頭：${header[0].toRadixString(16)} ${header[1].toRadixString(16)}');
+          }
+        }
+        
+        // 檢查 Content-Type 是否包含 "image" 或 "xml"（可能是錯誤響應）
+        if (!isImage) {
+          if (contentType.contains('xml') || contentType.contains('text') || contentType.contains('html')) {
+            // 可能是 XML/HTML 錯誤響應
+            try {
+              final text = String.fromCharCodes(bodyBytes.length > 500 ? bodyBytes.sublist(0, 500) : bodyBytes);
+              print('  - 檢測到 XML/文本響應：$text');
+              return {'status': 'error', 'message': '設備返回錯誤響應（可能是 XML 錯誤訊息）'};
+            } catch (e) {
+              // 忽略
+            }
+          }
+          if (!contentType.contains('image')) {
+            // 如果不是圖片格式，返回錯誤
+            return {'status': 'error', 'message': '響應不是有效的圖片格式（Content-Type: $contentType，大小: ${bodyBytes.length} 字節）'};
+          }
+        }
+        
         // 返回圖片數據
         return {
           'status': 'success',
-          'imageData': response.bodyBytes,
-          'contentType': response.headers['content-type'] ?? 'image/jpeg',
+          'imageData': bodyBytes,
+          'contentType': contentType.isNotEmpty ? contentType : 'image/jpeg',
         };
       } else {
-        return {'status': 'error', 'message': 'HTTP ${response.statusCode}'};
+        return {'status': 'error', 'message': 'HTTP ${streamedResponse.statusCode}'};
       }
     } catch (e) {
       return {'status': 'error', 'message': e.toString()};

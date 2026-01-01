@@ -993,7 +993,15 @@ class FileManagementPageState extends State<FileManagementPage> {
     });
     
     try {
-      final result = await _deviceService.getthumbnail(filePath);
+      // 根據檔案類型選擇不同的 API
+      // 照片使用 getthumbnail (cmd=4001)
+      // 影片使用 getscreennail (cmd=4002)
+      final fileType = _getFileTypeFromName(fileName);
+      print('載入縮圖：檔案類型=$fileType, 文件名=$fileName, 路徑=$filePath');
+      final result = fileType == 'video' 
+          ? await _deviceService.getscreennail(filePath)
+          : await _deviceService.getthumbnail(filePath);
+      print('載入縮圖結果：status=${result['status']}, 是否有圖片數據=${result['imageData'] != null}');
       
       if (!mounted) return;
       
@@ -1180,13 +1188,15 @@ class FileManagementPageState extends State<FileManagementPage> {
   }
   
   String? _getFileTypeFromName(String fileName) {
-    if (fileName.toLowerCase().endsWith('.jpg') || 
-        fileName.toLowerCase().endsWith('.jpeg') ||
-        fileName.toLowerCase().endsWith('.png')) {
+    final lowerName = fileName.toLowerCase();
+    if (lowerName.endsWith('.jpg') || 
+        lowerName.endsWith('.jpeg') ||
+        lowerName.endsWith('.png')) {
       return 'photo';
-    } else if (fileName.toLowerCase().endsWith('.mov') ||
-               fileName.toLowerCase().endsWith('.mp4') ||
-               fileName.toLowerCase().endsWith('.avi')) {
+    } else if (lowerName.endsWith('.mov') ||
+               lowerName.endsWith('.mp4') ||
+               lowerName.endsWith('.avi') ||
+               lowerName.endsWith('.ts')) {  // 添加 .ts 支持
       return 'video';
     }
     return null;
