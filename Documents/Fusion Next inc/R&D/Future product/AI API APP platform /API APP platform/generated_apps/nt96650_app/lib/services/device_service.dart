@@ -514,6 +514,18 @@ class DeviceService {
     return await _sendCommand(3027);
   }
 
+  /// 設置 PIP 樣式（用於即時預覽串流）
+  /// par: PIP_STYLE 枚舉值
+  /// 0: PIP_STYLE_1T1F - 只有 Path 1 全屏在頂部
+  /// 1: PIP_STYLE_1T1B2S - Path 1 在頂部，Path 1 大屏，Path 2 小屏
+  /// 2: PIP_STYLE_1T1S2B - Path 1 在頂部，Path 1 小屏，Path 2 大屏
+  /// 3: PIP_STYLE_2T2F - 只有 Path 2 全屏在頂部
+  /// 4: PIP_STYLE_2T1B2S - Path 2 在頂部，Path 1 大屏，Path 2 小屏
+  /// 5: PIP_STYLE_2T1S2B - Path 2 在頂部，Path 1 小屏，Path 2 大屏
+  Future<Map<String, dynamic>> setPipStyle(int par) async {
+    return await _sendCommand(3028, par: par);
+  }
+
   /// 獲取縮圖
   /// filePath: 文件路徑，例如 "A:\\CARDV\\PHOTO\\2014_0506_000000.0001.JPG"
   /// 根據成功的 HTTP headers，縮圖 URL 格式為：http://192.168.1.254/CARDV/MOVIE/...?customer=1&cmd=4001
